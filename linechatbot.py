@@ -81,7 +81,13 @@ def callback():
 
 # Handler function for Text Message
 def handle_TextMessage(event):
+    map='https://letswritetw.github.io/letswrite-google-map-api-6/?utm_source=line&utm_medium=robot'
     print(event.message.text)
+    if event.message.text.find("coronavirus") or event.message.text.find("新冠肺炎") or event.message.text.find("武漢肺炎") or event.message.text.find("Coronavirus"):
+        line_bot_api.reply_message(
+        event.reply_token,
+        TextSendMessage(map)
+    )
     answer=get_content(event.message.text)
     #msg = 'You said: "' + event.message.text + '" '
     line_bot_api.reply_message(
