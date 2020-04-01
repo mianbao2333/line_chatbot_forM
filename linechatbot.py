@@ -19,9 +19,15 @@ from linebot.exceptions import (
 )
 
 from linebot.models import (
-    MessageEvent, TextMessage, TextSendMessage, ImageMessage, VideoMessage, FileMessage, StickerMessage, StickerSendMessage
+    MessageEvent, TextMessage, TextSendMessage, ImageMessage, VideoMessage, FileMessage, StickerMessage, StickerSendMessage, TemplateSendMessage, ImageCarouselTemplate, ImageCarouselColumn, URITemplateAction
 )
 from linebot.utils import PY3
+
+HOST = "redis-11943.c1.asia-northeast1-1.gce.cloud.redislabs.com"
+PWD = "7w7O1oNH5GJY5ocDGr0ercUNFkE6PcPy"
+PORT = "11943"
+
+redis1 = redis.Redis(host=HOST, password=PWD, port=PORT)
 
 app = Flask(__name__)
 
@@ -79,22 +85,75 @@ def callback():
 
     return 'OK'
 
+def train_mode(event, train_step=0):
+    if train_step == 0:
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage('Which keyword do you want to teach me to reply?')
+        )
+        redis1.set('train_step', 1)
+    elif train_step == 1:
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage('How do you want me to reply it?')
+        )
+        redis1.set(event.source.user_id + 'teach', event.message.text)
+        redis1.set('train_step', 2)
+    elif train_step == 2:
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage('Ok! I remember it!')
+        )
+        redis1.set(event.source.user_id + str(redis1.get(event.source.user_id + 'teach'), encoding='utf-8'), event.message.text)
+        redis1.delete('train_step')
+    # line_bot_api.push_message(
+    #     event.source.user_id,
+    #     TextSendMessage('Push ' + msg))
+    # line_bot_api.reply_message(
+    #     event.reply_token,
+    #     TextSendMessage(msg))
+
 # Handler function for Text Message
 def handle_TextMessage(event):
-    map='https://letswritetw.github.io/letswrite-google-map-api-6/?utm_source=line&utm_medium=robot'
-    print(event.message.text)
-    if event.message.text.find("coronavirus") or event.message.text.find("新冠肺炎") or event.message.text.find("武漢肺炎") or event.message.text.find("Coronavirus"):
+    if redis1.get('train_step'):
+        train_mode(event, int.from_bytes(redis1.get('train_step'), byteorder='big')-48)
+    elif event.message.text == "teach":
+        train_mode(event)
+    elif redis1.get(event.message.text):
         line_bot_api.reply_message(
-        event.reply_token,
-        TextSendMessage(map)
-        return 
-    )
-    answer=get_content(event.message.text)
-    #msg = 'You said: "' + event.message.text + '" '
-    line_bot_api.reply_message(
-        event.reply_token,
-        TextSendMessage(answer)
-    )
+            event.reply_token,
+            TextSendMessage(str(redis1.get(event.message.text), encoding='utf-8'))
+        )
+    elif redis1.get(event.source.user_id + event.message.text):
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(str(redis1.get(event.source.user_id + event.message.text), encoding='utf-8'))
+        )
+    elif event.message.text.find("coronavirus") != -1 or event.message.text.find("新冠肺炎") != -1 \
+            or event.message.text.find("Coronavirus") != -1:
+
+        message = TemplateSendMessage(
+            alt_text='ImageCarousel template',
+            template=ImageCarouselTemplate(
+                columns=[
+                    ImageCarouselColumn(
+                        image_url='https://static.rti.org.tw/assets/thumbnails/2020/02/09/2583ee607285f873217e56f34079cd9d.jpg',
+                        action=URITemplateAction(
+                            label='新冠肺炎全球疫情分布图',
+                            uri='https://letswritetw.github.io/letswrite-google-map-api-6/'
+                        )
+                    )
+                ]
+            )
+        )
+        line_bot_api.reply_message(event.reply_token, message)
+    else:
+        answer = get_content(event.message.text)
+        # msg = 'You said: "' + event.message.text + '" '
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(answer)
+        )
 
 # Handler function for Sticker Message
 def handle_StickerMessage(event):
