@@ -1,5 +1,4 @@
 from __future__ import unicode_literals
-
 import os
 import sys
 import redis
@@ -11,6 +10,7 @@ from urllib.parse import quote
 from argparse import ArgumentParser
 import requests
 from flask import Flask, request, abort
+import json 
 from linebot import (
     LineBotApi, WebhookParser
 )
@@ -28,6 +28,10 @@ PWD = "7w7O1oNH5GJY5ocDGr0ercUNFkE6PcPy"
 PORT = "11943"
 
 redis1 = redis.Redis(host=HOST, password=PWD, port=PORT)
+
+# access_number = 0
+# access_time = 0
+# compare_time = time.time()
 
 app = Flask(__name__)
 
@@ -51,6 +55,28 @@ parser = WebhookParser(channel_secret)
 
 @app.route("/callback", methods=['POST'])
 def callback():
+    # example of auto-scaling
+    # global access_number
+    # global access_time
+    # global compare_time
+    #
+    # if access_number > 400:
+    #     if random.randint(0, 100) < 10:
+    #         return '400'
+    # elif access_number > 450:
+    #     if random.randint(0, 100) < 30:
+    #         return '400'
+    #
+    # access_number += 1
+    # if access_time == 0:
+    #     access_time = time.time()
+    # if access_time - compare_time > 15:
+    #     access_number -= 5 * (access_time - compare_time) // 15
+    #     compare_time = time.time()
+    #     if access_number <= 0:
+    #         access_number = 0
+    # access_time = time.time()
+
     signature = request.headers['X-Line-Signature']
 
     # get request body as text
@@ -84,7 +110,87 @@ def callback():
             continue
 
     return 'OK'
+def conv19selftest(event,table):
+    case=table["action"]
+    print(case)
+    if case=="step1" or case=="finish"  :
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage('do you have a fever or catch a cold?if your body temperature is higher than 37.3℃ then you have a fever.you should just reply yes or no'))
+        table["action"]="step2"
+        json_response=json.dumps(table)
+        redis1.set(event.source.user_id+"selftest",json_response)
+        return 1
+    elif case=="step2":
+        if event.message.text=="yes":
+            table["symptom"]=1
+        elif event.message.text=="no":
+            table["symptom"]=0
+        else :
+            line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage('please just sent me yes or no'))
+            return 1
+        table["action"]="step3"
+        json_response=json.dumps(table)
+        redis1.set(event.source.user_id+"selftest",json_response) 
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage('have you travel to or live in China, America, Europe, Japan recently? you should just reply yes or no'))
+        return 1
+    elif case=="step3":
+        if event.message.text=="yes":
+            table["contact history"]=1
+        elif event.message.text=="no":
+            table["contact history"]=0
+        else :
+            line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage('please just sent me yes or no')
+            )
+            return 1
+        table["action"]="step4"
+        json_response=json.dumps(table)
+        redis1.set(event.source.user_id+"selftest",json_response) 
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage('Have you had any contact with anyone come back from China, America, Europe, Japan recently? you should just reply yes or no'))
+        return 1
+    elif case=="step4":
+        if event.message.text=="yes":
+            table["contact history"]=1
+        elif event.message.text=="no":
+            table["contact history"]=0
+        else:
+            line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage('please just sent me yes or no'))
+            return 1
+        table["action"]="finish"
+        json_response=json.dumps(table)
+        redis1.set(event.source.user_id+"selftest",json_response)
+        if table["contact history"]==1 and table["symptom"]==1:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage('We recommend that you seek medical advice immediately, wear a mask and avoid using public transport'))
+        elif table["contact history"]==1 and table["symptom"]==0:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage('We recommend that you should quarantine yourself at home for at least two weeks, pay attention to hygiene, and seek medical advice immediately if you feel unwell'))
+        elif table["contact history"]==0 and table["symptom"]==1:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage('We recommend that you stay at home and take your temperature. If your symptoms do not disappear, seek medical advice immediately'))
+        elif table["contact history"]==0 and table["symptom"]==0:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage('You are in good health. Be careful and remember to wear a mask when you go out'))               
+        return
+    else:
+        pass
 
+
+    
 def train_mode(event, train_step=0):
     if train_step == 0:
         line_bot_api.reply_message(
@@ -115,6 +221,16 @@ def train_mode(event, train_step=0):
 
 # Handler function for Text Message
 def handle_TextMessage(event):
+    exists=redis1.exists(event.source.user_id+"selftest")
+    if exists==1:
+        json_response=redis1.get(event.source.user_id+"selftest")
+        table=json.loads(json_response)
+    else:
+        table={'action':None}
+    print(table)
+    if(event.message.text=="selftest"or (table["action"]!=None and table["action"]!="finish")):
+        if(conv19selftest(event,table)==1):
+            return None
     if redis1.get('train_step'):
         train_mode(event, int.from_bytes(redis1.get('train_step'), byteorder='big')-48)
     elif event.message.text == "teach":
@@ -140,19 +256,61 @@ def handle_TextMessage(event):
                         image_url='https://static.rti.org.tw/assets/thumbnails/2020/02/09/2583ee607285f873217e56f34079cd9d.jpg',
                         action=URITemplateAction(
                             label='新冠肺炎全球疫情分布图',
-                            uri='https://letswritetw.github.io/letswrite-google-map-api-6/'
+                            uri='https://coronavirus.jhu.edu/map.html'
                         )
                     )
                 ]
             )
         )
         line_bot_api.reply_message(event.reply_token, message)
+    elif event.message.text=="lastest report":
+        url = "https://covid-19-coronavirus-statistics.p.rapidapi.com/v1/total"
+        headers = {
+            'x-rapidapi-host': "covid-19-coronavirus-statistics.p.rapidapi.com",
+            'x-rapidapi-key': "db0079e3dcmshe792876b65bea00p19aee5jsnf11d8cb7c164"
+            }
+        response = requests.request("GET", url, headers=headers)
+        #response=json.loads(response)
+        print (type(response))
+
+        dic=response.json()
+        respon="recovered:"+str(dic["data"]["recovered"])+"\n"+"deaths: "+str(dic["data"]["deaths"])+"\n"+"confirmed: "+str(dic["data"]["confirmed"])
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=respon)   
+        )
+    elif event.message.text.find("situation")!=-1:
+        text=str(event.message.text)
+        text=text.split(" situation")
+        print(text)
+        url = "https://covid-19-coronavirus-statistics.p.rapidapi.com/v1/total"
+        querystring = {"country":text[0]}
+        headers = {
+            'x-rapidapi-host': "covid-19-coronavirus-statistics.p.rapidapi.com",
+            'x-rapidapi-key': "db0079e3dcmshe792876b65bea00p19aee5jsnf11d8cb7c164"
+            }
+
+        response = requests.request("GET", url, headers=headers,params=querystring)
+        #response=json.loads(response)
+        print (type(response))
+
+        dic=response.json()
+        if(dic["data"]["location"]=='Global'):
+            respon="location not found\nglobal:\n"
+        else:
+            respon=''
+        respon+="recovered:"+str(dic["data"]["recovered"])+"\n"+"deaths: "+str(dic["data"]["deaths"])+"\n"+"confirmed: "+str(dic["data"]["confirmed"])
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=respon)   
+        )
     else:
         answer = get_content(event.message.text)
+        print(event.source)
         # msg = 'You said: "' + event.message.text + '" '
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(answer)
+            TextSendMessage(text=answer)
         )
 
 # Handler function for Sticker Message
