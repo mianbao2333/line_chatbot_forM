@@ -113,7 +113,7 @@ def callback():
 def conv19selftest(event,table):
     case=table["action"]
     print(case)
-    if case=="step1" or case=="finish"  :
+    if case=="step1" or case=="finish" or case==None  :
         line_bot_api.reply_message(
             event.reply_token,
             TextSendMessage('do you have a fever or catch a cold?if your body temperature is higher than 37.3℃ then you have a fever.you should just reply yes or no'))
@@ -228,7 +228,8 @@ def handle_TextMessage(event):
     else:
         table={'action':None}
     print(table)
-    if(event.message.text=="selftest"or (table["action"]!=None and table["action"]!="finish")):
+    if(event.message.text=="selftest" or (table["action"]!=None and table["action"]!="finish")):
+        print("start selftest")
         if(conv19selftest(event,table)==1):
             return None
     if redis1.get('train_step'):
